@@ -1,7 +1,12 @@
 # Relève la vigilance Météo-France (via MeteoAlarm, sans clé — voir l'en-tête
-# de scripts/build-vigilance.mjs) et publie vigilance.json sur la branche
-# `vigilance-data` de ce dépôt, servie par raw.githubusercontent.com, le seul
-# maillon de la chaîne qui accepte le CORS.
+# de scripts/build-vigilance.mjs) ET la vigilance crues Vigicrues, puis publie
+# les deux sur la branche `vigilance-data` de ce dépôt, servie par
+# raw.githubusercontent.com, le seul maillon de la chaîne qui accepte le CORS.
+#
+# Les crues sont un simple miroir : Vigicrues a retiré l'en-tête CORS de son
+# GeoJSON le 2026-08-09 (et déplacé l'endpoint), l'app statique ne peut plus
+# le lire en direct. Le fichier est repris tel quel, sans transformation —
+# l'app le parse comme elle parsait l'original.
 #
 # Ce dépôt est public et dédié aux données : l'app (dépôt `bulletin`) est
 # privée, et raw.githubusercontent.com ne sert que les dépôts publics — le
@@ -40,12 +45,25 @@ jobs:
         run: |
           mkdir -p out
           node scripts/build-vigilance.mjs out/vigilance.json
+      # Non bloquant, avec repli sur la copie déjà publiée : un hoquet de
+      # Vigicrues ne doit ni faire échouer la vigilance météo, ni publier une
+      # branche sans le fichier crues (la branche est réécrite entière à chaque
+      # tour — un tour sans le fichier ferait 404 chez tous les utilisateurs).
+      # Si tout échoue au premier tour de l'histoire, le fichier manque et
+      # l'app annonce « non vérifiée », son régime normal d'indisponibilité.
+      - name: Relever les crues Vigicrues
+        run: |
+          curl -fsS --max-time 60 -o out/InfoVigiCru.geojson \
+            "https://www.vigicrues.gouv.fr/services/InfoVigiCru.geojson" \
+          || curl -fsS --max-time 60 -o out/InfoVigiCru.geojson \
+            "https://raw.githubusercontent.com/${{ github.repository }}/vigilance-data/InfoVigiCru.geojson" \
+          || echo "crues indisponibles ce tour-ci, et pas de copie precedente"
       - name: Publier sur la branche vigilance-data
         run: |
           cd out
           git init -b vigilance-data
           git config user.name "github-actions[bot]"
           git config user.email "github-actions[bot]@users.noreply.github.com"
-          git add vigilance.json
-          git commit -m "maj vigilance"
+          git add -A
+          git commit -m "maj vigilance et crues"
           git push --force "https://x-access-token:${{ secrets.GITHUB_TOKEN }}@github.com/${{ github.repository }}" vigilance-data
