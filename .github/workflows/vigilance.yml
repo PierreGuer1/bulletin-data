@@ -1,0 +1,51 @@
+# Relève la vigilance Météo-France (via MeteoAlarm, sans clé — voir l'en-tête
+# de scripts/build-vigilance.mjs) et publie vigilance.json sur la branche
+# `vigilance-data` de ce dépôt, servie par raw.githubusercontent.com, le seul
+# maillon de la chaîne qui accepte le CORS.
+#
+# Ce dépôt est public et dédié aux données : l'app (dépôt `bulletin`) est
+# privée, et raw.githubusercontent.com ne sert que les dépôts publics — le
+# pipeline vit donc ici, où son GITHUB_TOKEN suffit à publier.
+#
+# La branche est réécrite d'un commit unique à chaque tour (push --force) :
+# c'est une donnée périssable, son historique n'intéresse personne, et main
+# reste propre.
+#
+# Limites GitHub connues : un cron peut glisser de 10-15 min aux heures
+# chargées (sans gravité : la vigilance n'est émise qu'à 6 h, 16 h et 22 h),
+# et GitHub suspend les workflows planifiés après 60 jours sans activité sur
+# le dépôt — risque plus réel ici que dans le dépôt de l'app, puisque personne
+# ne développe dans celui-ci. GitHub prévient par e-mail avant de suspendre,
+# et l'app le voit de toute façon via `generatedAt` : elle annonce alors une
+# vigilance « non vérifiée » plutôt que de servir du périmé.
+name: vigilance
+
+on:
+  schedule:
+    - cron: "*/30 * * * *"
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  publier:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - name: Construire vigilance.json
+        run: |
+          mkdir -p out
+          node scripts/build-vigilance.mjs out/vigilance.json
+      - name: Publier sur la branche vigilance-data
+        run: |
+          cd out
+          git init -b vigilance-data
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git add vigilance.json
+          git commit -m "maj vigilance"
+          git push --force "https://x-access-token:${{ secrets.GITHUB_TOKEN }}@github.com/${{ github.repository }}" vigilance-data
